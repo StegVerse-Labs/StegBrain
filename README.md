@@ -1,5 +1,19 @@
 # StegBrain
 
+Autonomous global state controller for the StegVerse-Labs cluster.
+
+StegBrain:
+
+- Aggregates signals from all guardian repos (starting with StegDB)
+- Produces `meta/global_status.json`
+- Exposes a canonical cluster state: `ok`, `degraded`, `broken`, `unknown`
+- Maintains build-mode vs production-mode cluster enforcement
+- Enables "cannot deploy if cluster brain says no"
+
+This is the StegVerse control brain.
+
+# StegBrain
+
 Global health and dependency brain for the StegVerse-Labs cluster.
 
 StegBrain does **three main things**:

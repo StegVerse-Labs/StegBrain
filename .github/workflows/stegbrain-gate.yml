@@ -1,0 +1,42 @@
+name: StegBrain Gate
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  check-brain:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout StegBrain
+        uses: actions/checkout@v4
+        with:
+          repository: StegVerse-Labs/StegBrain
+          path: brain
+
+      - name: Read Brain State
+        id: brain
+        run: |
+          STATE=$(jq -r '.cluster.state' brain/meta/global_status.json)
+          echo "state=$STATE" >> $GITHUB_OUTPUT
+
+      - name: Enforce Brain Rules
+        run: |
+          case "${{ steps.brain.outputs.state }}" in
+            ok)
+              echo "Brain: OK — allow deploy"
+              ;;
+            degraded)
+              echo "Brain: DEGRADED — blocking deploy"
+              exit 1
+              ;;
+            unknown|broken)
+              echo "Brain: UNKNOWN/BROKEN — hard fail"
+              exit 1
+              ;;
+            *)
+              echo "Brain: INVALID STATE"
+              exit 1
+              ;;
+          esac

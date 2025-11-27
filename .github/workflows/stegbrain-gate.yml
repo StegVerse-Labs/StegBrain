@@ -1,7 +1,6 @@
 name: StegBrain Gate
 
 on:
-  workflow_dispatch:
   workflow_call:
 
 jobs:
@@ -18,25 +17,29 @@ jobs:
       - name: Read Brain State
         id: brain
         run: |
+          if [ ! -f brain/meta/global_status.json ]; then
+            echo "state=unknown" >> $GITHUB_OUTPUT
+            echo "allowed=false" >> $GITHUB_OUTPUT
+            echo "reason=global_status.json missing" >> $GITHUB_OUTPUT
+            exit 0
+          fi
           STATE=$(jq -r '.cluster.state' brain/meta/global_status.json)
+          ALLOWED=$(jq -r '.prod_gate.allowed' brain/meta/global_status.json)
+          REASON=$(jq -r '.prod_gate.reason' brain/meta/global_status.json)
           echo "state=$STATE" >> $GITHUB_OUTPUT
+          echo "allowed=$ALLOWED" >> $GITHUB_OUTPUT
+          echo "reason=$REASON" >> $GITHUB_OUTPUT
 
       - name: Enforce Brain Rules
         run: |
-          case "${{ steps.brain.outputs.state }}" in
-            ok)
-              echo "Brain: OK — allow deploy"
-              ;;
-            degraded)
-              echo "Brain: DEGRADED — blocking deploy"
-              exit 1
-              ;;
-            unknown|broken)
-              echo "Brain: UNKNOWN/BROKEN — hard fail"
-              exit 1
-              ;;
-            *)
-              echo "Brain: INVALID STATE"
-              exit 1
-              ;;
-          esac
+          STATE="${{ steps.brain.outputs.state }}"
+          ALLOWED="${{ steps.brain.outputs.allowed }}"
+          REASON="${{ steps.brain.outputs.reason }}"
+
+          echo "Brain state: $STATE"
+          echo "Prod allowed: $ALLOWED ($REASON)"
+
+          if [ "$ALLOWED" != "true" ]; then
+            echo "StegBrain blocked this deployment."
+            exit 1
+          fi

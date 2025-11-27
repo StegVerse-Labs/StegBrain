@@ -1,0 +1,18 @@
+{
+  "generated_at": "2025-11-27T23:38:59.684285+00:00",
+  "sources": {
+    "StegDB": {
+      "dependency_status_present": false,
+      "aggregated_files_count": 17
+    }
+  },
+  "cluster": {
+    "state": "unknown",
+    "issues": [
+      {
+        "source": "StegDB",
+        "issue": "missing_dependency_status"
+      }
+    ]
+  }
+}

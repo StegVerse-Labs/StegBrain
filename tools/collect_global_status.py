@@ -17,14 +17,27 @@ def load_json(path: Path):
 def count_jsonl_lines(path: Path) -> int:
     if not path.is_file():
         return 0
-    count = 0
-    with path.open("r", encoding="utf-8") as f:
-        for _ in f:
-            count += 1
-    return count
+    return sum(1 for _ in path.open("r", encoding="utf-8"))
+
+def determine_cluster_state(dep_status):
+    """
+    Converts StegDB dependency status into cluster brain state.
+    """
+    if dep_status is None:
+        return "unknown", [{"source": "StegDB", "issue": "missing_dependency_status"}]
+
+    if isinstance(dep_status, dict):
+        global_ok = dep_status.get("global_ok")
+        issues = dep_status.get("issues") or []
+
+        if global_ok is True:
+            return "ok", issues
+        if global_ok is False:
+            return "degraded", issues
+
+    return "unknown", [{"source": "StegDB", "issue": "malformed_dependency_status"}]
 
 def main():
-    # Where StegDB will be checked out by the workflow
     stegdb_root = ROOT / "external" / "StegDB"
 
     dep_status_path = stegdb_root / "meta" / "dependency_status.json"
@@ -33,36 +46,9 @@ def main():
     dep_status = load_json(dep_status_path)
     aggregated_count = count_jsonl_lines(aggregated_files_path)
 
-    # Determine overall health from dependency_status.json if present
-    global_ok = None
-    issues = []
+    cluster_state, issues = determine_cluster_state(dep_status)
 
-    if isinstance(dep_status, dict):
-        global_ok = dep_status.get("global_ok")
-        if not isinstance(global_ok, bool):
-            global_ok = None
-
-        detected_issues = dep_status.get("issues") or []
-        if isinstance(detected_issues, list):
-            for issue in detected_issues:
-                if isinstance(issue, dict):
-                    issues.append(issue)
-                else:
-                    issues.append({"raw": issue})
-    elif dep_status is None:
-        issues.append({"source": "StegDB", "reason": "missing_dependency_status"})
-    else:
-        issues.append({"source": "StegDB", "reason": "invalid_dependency_status_format"})
-
-    # Fallback if we couldn't determine global_ok
-    if global_ok is None:
-        global_state = "unknown"
-    elif global_ok:
-        global_state = "ok"
-    else:
-        global_state = "degraded"
-
-    output = {
+    brain_output = {
         "generated_at": NOW,
         "sources": {
             "StegDB": {
@@ -70,19 +56,17 @@ def main():
                 "aggregated_files_count": aggregated_count,
             }
         },
-        "global": {
-            "state": global_state,  # "ok" | "degraded" | "unknown"
-            "ok": bool(global_ok) if isinstance(global_ok, bool) else None,
-        },
-        "issues": issues,
+        "cluster": {
+            "state": cluster_state,   # ok | degraded | broken | unknown
+            "issues": issues,
+        }
     }
 
-    meta_dir = ROOT / "meta"
-    meta_dir.mkdir(parents=True, exist_ok=True)
-    out_path = meta_dir / "global_status.json"
-    out_path.write_text(json.dumps(output, indent=2, sort_keys=True), encoding="utf-8")
+    out_path = ROOT / "meta" / "global_status.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(brain_output, indent=2), encoding="utf-8")
 
-    print(f"Wrote global status to {out_path}")
+    print(f"[StegBrain] Updated global status: {out_path}")
 
 if __name__ == "__main__":
     main()

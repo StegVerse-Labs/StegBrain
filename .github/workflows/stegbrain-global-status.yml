@@ -3,14 +3,13 @@ name: StegBrain Global Status
 on:
   workflow_dispatch:
   schedule:
-    # Every hour; adjust if you want slower/faster
-    - cron: "0 * * * *"
+    - cron: "*/30 * * * *"
 
 permissions:
   contents: write
 
 jobs:
-  global-status:
+  brain:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,23 +22,23 @@ jobs:
           repository: StegVerse-Labs/StegDB
           path: external/StegDB
 
-      - name: Set up Python
+      - name: Install Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Collect global status
+      - name: Run Brain Aggregator
         run: python tools/collect_global_status.py
 
-      - name: Commit and push if changed
+      - name: Commit if changed
         run: |
           if git status --porcelain | grep .; then
-            echo "Changes detected, committing global_status.json"
+            echo "Brain update detected — committing."
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add meta/global_status.json
-            git commit -m "Update global status [skip ci]"
+            git commit -m "Update global brain state"
             git push
           else
-            echo "No changes to global status."
+            echo "Nothing to update."
           fi

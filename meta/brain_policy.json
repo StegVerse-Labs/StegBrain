@@ -1,0 +1,10 @@
+{
+  "required_repos_for_prod": [
+    "CosDen",
+    "StegCore",
+    "StegVerse-SCW",
+    "TV"
+  ],
+  "min_aggregated_records": 1,
+  "allow_prod_if_unknown": false
+}

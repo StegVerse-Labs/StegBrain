@@ -1,18 +1,20 @@
 {
-  "generated_at": "2025-11-27T23:38:59.684285+00:00",
+  "generated_at": "2025-11-28T01:39:12.102247+00:00",
   "sources": {
     "StegDB": {
       "dependency_status_present": false,
-      "aggregated_files_count": 17
+      "dependency_status_path": "/home/runner/work/StegBrain/StegBrain/external/StegDB/meta/dependency_status.json"
     }
   },
   "cluster": {
     "state": "unknown",
+    "affected_repos": [],
     "issues": [
-      {
-        "source": "StegDB",
-        "issue": "missing_dependency_status"
-      }
+      "dependency_status.json missing from StegDB"
     ]
+  },
+  "prod_gate": {
+    "allowed": false,
+    "reason": "StegDB dependency_status.json missing; prod blocked."
   }
 }

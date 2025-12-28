@@ -1,0 +1,11 @@
+# StegBrain runtime requirements
+# Keep this intentionally minimal and explicit
+
+# Core policy decision spine (authoritative)
+stegcore @ git+https://github.com/stegverse-labs/StegCore.git@main
+
+# YAML handling (used by workflows / tools if needed)
+PyYAML>=6.0
+
+# JSON schema / typing helpers (safe, stdlib-adjacent)
+typing_extensions>=4.8.0

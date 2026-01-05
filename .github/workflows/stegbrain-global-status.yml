@@ -1,44 +1,90 @@
-name: StegBrain Global Status
+name: StegBrain - Global Status
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 9 * * *"  # daily 09:00 UTC
+  repository_dispatch:
+    types: [stegbrain-global-status]
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
-  brain:
+  global-status:
     runs-on: ubuntu-latest
+
+    env:
+      STEGDB_STATUS_URL: "https://raw.githubusercontent.com/StegVerse-Labs/StegDB/main/meta/dependency_status.json"
 
     steps:
       - name: Checkout StegBrain
         uses: actions/checkout@v4
-
-      - name: Checkout StegDB
-        uses: actions/checkout@v4
         with:
-          repository: StegVerse-Labs/StegDB
-          path: external/StegDB
+          fetch-depth: 0
 
-      - name: Install Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Run Brain Aggregator
-        run: python tools/collect_global_status.py
-
-      - name: Commit if changed
+      - name: Bootstrap dirs
+        shell: bash
         run: |
-          if git status --porcelain | grep .; then
-            echo "Brain update detected — committing."
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add meta/global_status.json
-            git commit -m "Update global brain state"
-            git push
+          set -euo pipefail
+          mkdir -p meta meta_sources scripts
+
+      - name: Fetch StegDB dependency_status.json (fail-closed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p meta_sources
+
+          # Try to fetch. If it fails, create a minimal BROKEN status input locally.
+          if curl -fsSL "${STEGDB_STATUS_URL}" -o meta_sources/stegdb_dependency_status.json; then
+            echo "Fetched StegDB dependency status."
           else
-            echo "Nothing to update."
+            echo "::warning title=StegDB status fetch failed::Writing fail-closed input"
+            cat > meta_sources/stegdb_dependency_status.json <<EOF
+          {
+            "provider": "StegDB",
+            "state": "broken",
+            "reason": "fetch-failed",
+            "generated_at_utc": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "details": {
+              "url": "${STEGDB_STATUS_URL}"
+            }
+          }
+          EOF
           fi
+
+          echo "Input:"
+          cat meta_sources/stegdb_dependency_status.json
+
+      - name: Compute global_status.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/compute_global_status.py | tee meta/global_status.json
+
+          echo "Wrote meta/global_status.json:"
+          cat meta/global_status.json
+
+      - name: Commit & push meta/global_status.json (main only)
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git add meta/global_status.json meta_sources/stegdb_dependency_status.json 2>/dev/null || true
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(meta): update global status [skip ci]"
+          git push

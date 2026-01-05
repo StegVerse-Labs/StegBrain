@@ -33,24 +33,29 @@ jobs:
             exit 1
           fi
 
-          echo "Global status file:"
+          echo "Global status file (raw):"
           cat "$FILE"
 
-          STATE=$(python - <<'PY'
-          import json
-          with open("meta/global_status.json","r",encoding="utf-8") as f:
-              d=json.load(f)
-          print(d.get("state","broken"))
-          PY
-          )
+          # Hard-validate JSON so we fail with a clear error instead of a stack trace
+          if ! python -m json.tool "$FILE" >/dev/null 2>&1; then
+            echo "::error title=Invalid JSON in global_status.json::File is not valid JSON (possible log contamination)."
+            exit 1
+          fi
 
-          REASON=$(python - <<'PY'
-          import json
-          with open("meta/global_status.json","r",encoding="utf-8") as f:
-              d=json.load(f)
-          print(d.get("reason","no-reason"))
-          PY
-          )
+          STATE="$(python - <<'PY'
+import json
+with open("meta/global_status.json","r",encoding="utf-8") as f:
+    d = json.load(f)
+print(d.get("state","broken"))
+PY
+)"
+          REASON="$(python - <<'PY'
+import json
+with open("meta/global_status.json","r",encoding="utf-8") as f:
+    d = json.load(f)
+print(d.get("reason","no-reason"))
+PY
+)"
 
           echo "state=$STATE" >> "$GITHUB_OUTPUT"
           echo "reason=$REASON" >> "$GITHUB_OUTPUT"

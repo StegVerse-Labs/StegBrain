@@ -36,9 +36,9 @@ jobs:
           echo "Global status file (raw):"
           cat "$FILE"
 
-          # Hard-validate JSON so we fail with a clear error instead of a stack trace
+          # Hard-validate JSON so we fail with a clear error
           if ! python -m json.tool "$FILE" >/dev/null 2>&1; then
-            echo "::error title=Invalid JSON in global_status.json::File is not valid JSON (possible log contamination)."
+            echo "::error title=Invalid JSON in global_status.json::File is not valid JSON (possible contamination)."
             exit 1
           fi
 

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StegBrain Global Status",
+  "type": "object",
+  "required": ["state", "generated_at_utc", "sources", "reasons"],
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": ["ok", "degraded", "broken"]
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["state", "reason"],
+        "properties": {
+          "state": { "type": "string", "enum": ["ok", "degraded", "broken"] },
+          "reason": { "type": "string" },
+          "details": { "type": "object" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

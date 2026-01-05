@@ -1,24 +1,25 @@
-name: global-status
+name: StegBrain - Global Status
 
 on:
   workflow_dispatch: {}
   schedule:
-    - cron: "0 9 * * *" # daily 09:00 UTC (adjust as desired)
+    - cron: "0 5 * * *" # daily 05:00 UTC
+  repository_dispatch:
+    types: [stegbrain-recompute]
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   global-status:
     runs-on: ubuntu-latest
 
-    env:
-      # Raw URL to StegDB's published dependency_status.json (adjust if your path differs)
-      STEGDB_STATUS_URL: "https://raw.githubusercontent.com/StegVerse-Labs/StegDB/main/meta/dependency_status.json"
-
     steps:
-      - name: Checkout
+      - name: Checkout StegBrain
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -26,59 +27,22 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install minimal deps
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          # If your scripts need extra libs, add them here:
-          # pip install -r requirements.txt
-
       - name: Ensure directories
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p meta meta_sources
 
-      - name: Fetch StegDB dependency status
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if curl -fsSL "$STEGDB_STATUS_URL" -o meta_sources/stegdb_dependency_status.json; then
-            echo "Fetched StegDB status from: $STEGDB_STATUS_URL"
-          else
-            echo "::warning title=StegDB status fetch failed::Could not fetch $STEGDB_STATUS_URL; writing broken status input."
-            cat > meta_sources/stegdb_dependency_status.json <<EOF
-{
-  "provider": "StegDB",
-  "state": "broken",
-  "reason": "fetch-failed",
-  "generated_at_utc": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
-  "details": {
-    "url": "${STEGDB_STATUS_URL}"
-  }
-}
-EOF
-          fi
-
-          echo "Input:"
-          cat meta_sources/stegdb_dependency_status.json
-
       - name: Compute global_status.json
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ ! -f "scripts/compute_global_status.py" ]]; then
-            echo "::error title=Missing script::scripts/compute_global_status.py not found"
-            exit 2
-          fi
-
-          # IMPORTANT: write ONLY JSON to the file (no tee)
+          # IMPORTANT: never pipe logs into the JSON file.
+          # Write JSON ONLY to the file.
           python scripts/compute_global_status.py > meta/global_status.json
 
-          # Validate JSON (hard fail if not valid)
+          # Validate JSON (fail hard if invalid)
           python -m json.tool meta/global_status.json >/dev/null
 
           echo "Wrote meta/global_status.json:"
@@ -90,7 +54,7 @@ EOF
         run: |
           set -euo pipefail
 
-          git add meta/global_status.json meta_sources/stegdb_dependency_status.json
+          git add meta/global_status.json meta_sources/*.json || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit."
@@ -99,6 +63,5 @@ EOF
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git commit -m "chore(meta): update global status [skip ci]"
           git push

@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   issues: write
+  actions: read
 
 jobs:
   auto_heal:
@@ -24,34 +25,26 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Ensure directories
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p meta meta_sources
-
-      - name: Read Brain State (fail-safe; no jq)
+      - name: Read Brain State (fail-safe, no jq)
         id: state
         shell: bash
         run: |
           set -euo pipefail
 
+          mkdir -p meta
+
           FILE="meta/global_status.json"
 
-          # If missing or invalid, mark as broken (fail-closed).
+          # If missing OR invalid JSON -> treat as broken (fail-closed)
           if [[ ! -f "$FILE" ]]; then
             echo "state=broken" >> "$GITHUB_OUTPUT"
             echo "reason=missing-global-status" >> "$GITHUB_OUTPUT"
-            echo "Current state: broken"
-            echo "Reason: missing-global-status"
             exit 0
           fi
 
           if ! python -m json.tool "$FILE" >/dev/null 2>&1; then
             echo "state=broken" >> "$GITHUB_OUTPUT"
             echo "reason=invalid-json" >> "$GITHUB_OUTPUT"
-            echo "Current state: broken"
-            echo "Reason: invalid-json"
             exit 0
           fi
 
@@ -88,80 +81,26 @@ PY
           fi
           echo "heal=true" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch StegDB dependency_status.json (for heal)
+      - name: Trigger StegBrain recompute (self-fix dispatch)
         if: ${{ steps.decide.outputs.heal == 'true' }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GH_STEGVERSE_PAT_FG }}
-          STEGDB_RAW_URL: "https://raw.githubusercontent.com/StegVerse-Labs/StegDB/main/meta/dependency_status.json"
         run: |
           set -euo pipefail
-
-          OUT="meta_sources/stegdb_dependency_status.json"
-          TMP="$(mktemp)"
-
-          if [[ -n "${GH_TOKEN:-}" ]]; then
-            curl -fsSL -H "Authorization: token ${GH_TOKEN}" "$STEGDB_RAW_URL" -o "$TMP" || true
-          else
-            curl -fsSL "$STEGDB_RAW_URL" -o "$TMP" || true
-          fi
-
-          if [[ ! -s "$TMP" ]]; then
-            cat > "$OUT" <<'EOF'
-{
-  "provider": "StegDB",
-  "state": "broken",
-  "reason": "fetch-failed",
-  "generated_at_utc": "",
-  "details": {}
-}
-EOF
-            echo "::warning title=StegDB fetch failed::Wrote fail-closed meta_sources/stegdb_dependency_status.json"
-          else
-            if ! python -m json.tool "$TMP" >/dev/null 2>&1; then
-              cat > "$OUT" <<'EOF'
-{
-  "provider": "StegDB",
-  "state": "broken",
-  "reason": "invalid-json-from-stegdb",
-  "generated_at_utc": "",
-  "details": {}
-}
-EOF
-              echo "::warning title=StegDB returned invalid JSON::Wrote fail-closed meta_sources/stegdb_dependency_status.json"
-            else
-              mv "$TMP" "$OUT"
-              echo "Fetched StegDB dependency status -> $OUT"
-            fi
-          fi
-
-      - name: Heal by recomputing + committing global_status.json
-        if: ${{ steps.decide.outputs.heal == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python scripts/compute_global_status.py
-          python -m json.tool meta/global_status.json >/dev/null
-
-          git add meta/global_status.json meta_sources/*.json || true
-
-          if git diff --cached --quiet; then
-            echo "No changes after heal."
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::warning::Missing GH_STEGVERSE_PAT_FG secret; cannot dispatch recompute."
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore(meta): auto-heal global status [skip ci]"
-          git push
+          curl -fsSL -X POST \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/StegVerse-Labs/StegBrain/dispatches \
+            -d '{"event_type":"stegbrain-recompute"}' || true
 
-      - name: Open/Update Heal Issue (when not OK)
+      - name: Open/Log Heal Issue (optional)
         if: ${{ steps.decide.outputs.heal == 'true' }}
-        uses: peter-evans/create-issue-from-file@v4
-        with:
-          title: "StegBrain auto-heal triggered ❗"
-          content-filepath: .github/ISSUE_TEMPLATE/auto_heal.md
-          labels: "autofix,stegbrain,needs-attention"
-          update-existing: true
-          search-existing: "title"
+        shell: bash
+        run: |
+          echo "Auto-heal triggered; consider logging an issue (template optional)."

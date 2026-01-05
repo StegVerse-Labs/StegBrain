@@ -1,18 +1,9 @@
-{
-  "generated_at": "2026-01-05T05:09:27.062970+00:00",
-  "sources": {
-    "StegDB": {
-      "dependency_status_present": true,
-      "dependency_status_path": "/home/runner/work/StegBrain/StegBrain/external/StegDB/meta/dependency_status.json"
-    }
+{"provider": "StegBrain", "state": "ok", "reason": "stegdb:canonical-published", "generated_at_utc": "2026-01-05T05:24:13Z", "details": {"source": "StegBrain", "generated_at_utc": "2026-01-05T05:24:13Z", "inputs": {"StegDB": {"artifacts": {"aggregated_files_jsonl": false, "canonical_bundle_sha256": "2dc699498e3137edcc61b24da8c79d875794141613d428335d2aaf5402dd8f98"}, "details": {"job": "publish", "job_status": "success", "workflow": "publish-canonical"}, "generated_at_utc": "2026-01-05T05:07:07Z", "provider": "StegDB", "reason": "canonical-published", "state": "ok"}}}}
+,
+    "source": "StegBrain"
   },
-  "cluster": {
-    "state": "degraded",
-    "affected_repos": [],
-    "issues": []
-  },
-  "prod_gate": {
-    "allowed": false,
-    "reason": "Cluster state is degraded; prod blocked."
-  }
+  "generated_at_utc": "2026-01-05T05:24:13Z",
+  "provider": "StegBrain",
+  "reason": "stegdb:canonical-published",
+  "state": "ok"
 }

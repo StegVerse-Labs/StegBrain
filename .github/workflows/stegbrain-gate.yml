@@ -21,7 +21,7 @@ jobs:
       - name: Checkout StegBrain
         uses: actions/checkout@v4
 
-      - name: Read meta/global_status.json
+      - name: Read meta/global_status.json (validate + extract)
         id: read
         shell: bash
         run: |
@@ -29,30 +29,30 @@ jobs:
 
           FILE="meta/global_status.json"
           if [[ ! -f "$FILE" ]]; then
-            echo "::error title=Missing global_status.json::StegBrain meta/global_status.json not found (fail-closed)."
+            echo "::error title=Missing global_status.json::meta/global_status.json not found (fail-closed)."
             exit 1
           fi
 
           echo "Global status file (raw):"
           cat "$FILE"
 
-          # Hard-validate JSON so we fail with a clear error
+          # Hard validate JSON so failures are clear (not stack traces)
           if ! python -m json.tool "$FILE" >/dev/null 2>&1; then
-            echo "::error title=Invalid JSON in global_status.json::File is not valid JSON (possible contamination)."
+            echo "::error title=Invalid JSON in global_status.json::File is not valid JSON (likely contamination)."
             exit 1
           fi
 
           STATE="$(python - <<'PY'
 import json
 with open("meta/global_status.json","r",encoding="utf-8") as f:
-    d = json.load(f)
+    d=json.load(f)
 print(d.get("state","broken"))
 PY
 )"
           REASON="$(python - <<'PY'
 import json
 with open("meta/global_status.json","r",encoding="utf-8") as f:
-    d = json.load(f)
+    d=json.load(f)
 print(d.get("reason","no-reason"))
 PY
 )"

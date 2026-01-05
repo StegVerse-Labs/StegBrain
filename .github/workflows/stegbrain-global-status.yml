@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   global-status:
@@ -31,71 +32,21 @@ jobs:
           set -euo pipefail
           mkdir -p meta meta_sources
 
-      - name: Fetch StegDB dependency_status.json (fail-closed)
-        shell: bash
-        env:
-          # Optional. If StegDB is private, set this secret in StegBrain.
-          GH_TOKEN: ${{ secrets.GH_STEGVERSE_PAT_FG }}
-          STEGDB_RAW_URL: "https://raw.githubusercontent.com/StegVerse-Labs/StegDB/main/meta/dependency_status.json"
-        run: |
-          set -euo pipefail
+      # OPTIONAL: If you later fetch StegDB signals into meta_sources/, do it here.
+      # This workflow currently computes from local meta_sources/ files only.
 
-          OUT="meta_sources/stegdb_dependency_status.json"
-          TMP="$(mktemp)"
-
-          # Try to fetch. If token exists, use it; otherwise anonymous.
-          if [[ -n "${GH_TOKEN:-}" ]]; then
-            curl -fsSL -H "Authorization: token ${GH_TOKEN}" "$STEGDB_RAW_URL" -o "$TMP" || true
-          else
-            curl -fsSL "$STEGDB_RAW_URL" -o "$TMP" || true
-          fi
-
-          if [[ ! -s "$TMP" ]]; then
-            # Write a valid, fail-closed JSON source so compute_global_status can proceed deterministically.
-            cat > "$OUT" <<'EOF'
-{
-  "provider": "StegDB",
-  "state": "broken",
-  "reason": "fetch-failed",
-  "generated_at_utc": "",
-  "details": {}
-}
-EOF
-            echo "::warning title=StegDB fetch failed::Wrote fail-closed meta_sources/stegdb_dependency_status.json"
-          else
-            # Validate the fetched JSON before using it.
-            if ! python -m json.tool "$TMP" >/dev/null 2>&1; then
-              cat > "$OUT" <<'EOF'
-{
-  "provider": "StegDB",
-  "state": "broken",
-  "reason": "invalid-json-from-stegdb",
-  "generated_at_utc": "",
-  "details": {}
-}
-EOF
-              echo "::warning title=StegDB returned invalid JSON::Wrote fail-closed meta_sources/stegdb_dependency_status.json"
-            else
-              mv "$TMP" "$OUT"
-              echo "Fetched StegDB dependency status -> $OUT"
-            fi
-          fi
-
-          echo "StegDB input (meta_sources/stegdb_dependency_status.json):"
-          cat "$OUT"
-
-      - name: Compute global_status.json (writes file; no stdout redirection)
+      - name: Compute global_status.json (JSON-only, validated)
         shell: bash
         run: |
           set -euo pipefail
 
-          python scripts/compute_global_status.py
+          # Write JSON ONLY to file (no tee, no extra prints in stream)
+          python scripts/compute_global_status.py > meta/global_status.json
 
-          # Hard validation (must be valid JSON)
+          # Hard validate JSON
           python -m json.tool meta/global_status.json >/dev/null
 
-          echo "Valid global_status.json written:"
-          cat meta/global_status.json
+          echo "✅ Valid meta/global_status.json written."
 
       - name: Commit & push meta/global_status.json (main only)
         if: github.ref == 'refs/heads/main'
@@ -103,7 +54,7 @@ EOF
         run: |
           set -euo pipefail
 
-          git add meta/global_status.json meta_sources/*.json || true
+          git add meta/global_status.json meta_sources/*.json 2>/dev/null || true
 
           if git diff --cached --quiet; then
             echo "No changes to commit."

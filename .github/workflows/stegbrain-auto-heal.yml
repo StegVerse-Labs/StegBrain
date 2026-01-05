@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
   issues: write
-  actions: read
 
 jobs:
   auto_heal:
@@ -25,47 +24,42 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Read Brain State (fail-safe)
+      - name: Ensure directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p meta meta_sources
+
+      - name: Read Brain State (fail-safe; no jq)
         id: state
         shell: bash
         run: |
           set -euo pipefail
 
-          mkdir -p meta
-
           FILE="meta/global_status.json"
 
-          # If missing, create a fail-closed status
+          # If missing or invalid, mark as broken (fail-closed).
           if [[ ! -f "$FILE" ]]; then
-            cat > "$FILE" <<'EOF'
-          {
-            "provider": "StegBrain",
-            "state": "unknown",
-            "reason": "missing-global-status",
-            "generated_at_utc": "",
-            "details": {}
-          }
-          EOF
+            echo "state=broken" >> "$GITHUB_OUTPUT"
+            echo "reason=missing-global-status" >> "$GITHUB_OUTPUT"
+            echo "Current state: broken"
+            echo "Reason: missing-global-status"
+            exit 0
           fi
 
-          # If invalid JSON, overwrite with a fail-closed status
           if ! python -m json.tool "$FILE" >/dev/null 2>&1; then
-            cat > "$FILE" <<'EOF'
-          {
-            "provider": "StegBrain",
-            "state": "unknown",
-            "reason": "invalid-json",
-            "generated_at_utc": "",
-            "details": {}
-          }
-          EOF
+            echo "state=broken" >> "$GITHUB_OUTPUT"
+            echo "reason=invalid-json" >> "$GITHUB_OUTPUT"
+            echo "Current state: broken"
+            echo "Reason: invalid-json"
+            exit 0
           fi
 
           STATE="$(python - <<'PY'
 import json
 with open("meta/global_status.json","r",encoding="utf-8") as f:
     d=json.load(f)
-print(d.get("state","unknown"))
+print(d.get("state","broken"))
 PY
 )"
           REASON="$(python - <<'PY'
@@ -88,34 +82,81 @@ PY
         run: |
           set -euo pipefail
           STATE="${{ steps.state.outputs.state }}"
-
           if [[ "$STATE" == "ok" ]]; then
             echo "heal=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
           echo "heal=true" >> "$GITHUB_OUTPUT"
 
-      - name: Trigger StegBrain recompute (self-fix)
+      - name: Fetch StegDB dependency_status.json (for heal)
         if: ${{ steps.decide.outputs.heal == 'true' }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GH_STEGVERSE_PAT_FG }}
+          STEGDB_RAW_URL: "https://raw.githubusercontent.com/StegVerse-Labs/StegDB/main/meta/dependency_status.json"
         run: |
           set -euo pipefail
-          if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "::warning::Missing GH_STEGVERSE_PAT_FG secret; cannot dispatch recompute."
+
+          OUT="meta_sources/stegdb_dependency_status.json"
+          TMP="$(mktemp)"
+
+          if [[ -n "${GH_TOKEN:-}" ]]; then
+            curl -fsSL -H "Authorization: token ${GH_TOKEN}" "$STEGDB_RAW_URL" -o "$TMP" || true
+          else
+            curl -fsSL "$STEGDB_RAW_URL" -o "$TMP" || true
+          fi
+
+          if [[ ! -s "$TMP" ]]; then
+            cat > "$OUT" <<'EOF'
+{
+  "provider": "StegDB",
+  "state": "broken",
+  "reason": "fetch-failed",
+  "generated_at_utc": "",
+  "details": {}
+}
+EOF
+            echo "::warning title=StegDB fetch failed::Wrote fail-closed meta_sources/stegdb_dependency_status.json"
+          else
+            if ! python -m json.tool "$TMP" >/dev/null 2>&1; then
+              cat > "$OUT" <<'EOF'
+{
+  "provider": "StegDB",
+  "state": "broken",
+  "reason": "invalid-json-from-stegdb",
+  "generated_at_utc": "",
+  "details": {}
+}
+EOF
+              echo "::warning title=StegDB returned invalid JSON::Wrote fail-closed meta_sources/stegdb_dependency_status.json"
+            else
+              mv "$TMP" "$OUT"
+              echo "Fetched StegDB dependency status -> $OUT"
+            fi
+          fi
+
+      - name: Heal by recomputing + committing global_status.json
+        if: ${{ steps.decide.outputs.heal == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python scripts/compute_global_status.py
+          python -m json.tool meta/global_status.json >/dev/null
+
+          git add meta/global_status.json meta_sources/*.json || true
+
+          if git diff --cached --quiet; then
+            echo "No changes after heal."
             exit 0
           fi
 
-          # Fire-and-forget dispatch to recompute global status cleanly
-          curl -fsSL -X POST \
-            -H "Authorization: token ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/StegVerse-Labs/StegBrain/dispatches \
-            -d '{"event_type":"stegbrain-recompute"}' || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(meta): auto-heal global status [skip ci]"
+          git push
 
-      - name: Open/Log Heal Issue
+      - name: Open/Update Heal Issue (when not OK)
         if: ${{ steps.decide.outputs.heal == 'true' }}
         uses: peter-evans/create-issue-from-file@v4
         with:

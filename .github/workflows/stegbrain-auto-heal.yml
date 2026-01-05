@@ -1,13 +1,14 @@
 name: StegBrain Auto-Heal
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
-    - cron: "*/60 * * * *"
+    - cron: "15 5 * * *" # daily 05:15 UTC (after global-status)
 
 permissions:
   contents: write
   issues: write
+  actions: read
 
 jobs:
   auto_heal:
@@ -16,52 +17,110 @@ jobs:
     steps:
       - name: Checkout StegBrain
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Read Brain State
-        id: brain
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Read Brain State (fail-safe)
+        id: state
+        shell: bash
         run: |
-          if [ ! -f meta/global_status.json ]; then
-            echo "state=unknown" >> $GITHUB_OUTPUT
-            echo "reason=global_status.json missing" >> $GITHUB_OUTPUT
-            exit 0
+          set -euo pipefail
+
+          mkdir -p meta
+
+          FILE="meta/global_status.json"
+
+          # If missing, create a fail-closed status
+          if [[ ! -f "$FILE" ]]; then
+            cat > "$FILE" <<'EOF'
+          {
+            "provider": "StegBrain",
+            "state": "unknown",
+            "reason": "missing-global-status",
+            "generated_at_utc": "",
+            "details": {}
+          }
+          EOF
           fi
-          STATE=$(jq -r '.cluster.state' meta/global_status.json)
-          REASON=$(jq -r '.prod_gate.reason' meta/global_status.json)
-          echo "state=$STATE" >> $GITHUB_OUTPUT
-          echo "reason=$REASON" >> $GITHUB_OUTPUT
+
+          # If invalid JSON, overwrite with a fail-closed status
+          if ! python -m json.tool "$FILE" >/dev/null 2>&1; then
+            cat > "$FILE" <<'EOF'
+          {
+            "provider": "StegBrain",
+            "state": "unknown",
+            "reason": "invalid-json",
+            "generated_at_utc": "",
+            "details": {}
+          }
+          EOF
+          fi
+
+          STATE="$(python - <<'PY'
+import json
+with open("meta/global_status.json","r",encoding="utf-8") as f:
+    d=json.load(f)
+print(d.get("state","unknown"))
+PY
+)"
+          REASON="$(python - <<'PY'
+import json
+with open("meta/global_status.json","r",encoding="utf-8") as f:
+    d=json.load(f)
+print(d.get("reason","no-reason"))
+PY
+)"
+
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+
+          echo "Current state: $STATE"
+          echo "Reason: $REASON"
 
       - name: Decide Heal
         id: decide
+        shell: bash
         run: |
-          STATE="${{ steps.brain.outputs.state }}"
-          if [ "$STATE" = "ok" ]; then
-            echo "heal_needed=false" >> $GITHUB_OUTPUT
-          else
-            echo "heal_needed=true" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          STATE="${{ steps.state.outputs.state }}"
+
+          if [[ "$STATE" == "ok" ]]; then
+            echo "heal=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-      - name: Trigger StegDB Full Cycle
-        if: steps.decide.outputs.heal_needed == 'true'
+          echo "heal=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger StegBrain recompute (self-fix)
+        if: ${{ steps.decide.outputs.heal == 'true' }}
+        shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_STEGVERSE_PAT_FG }}
         run: |
-          echo "Triggering StegDB full-cycle via repository_dispatch..."
-          curl -s -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::warning::Missing GH_STEGVERSE_PAT_FG secret; cannot dispatch recompute."
+            exit 0
+          fi
+
+          # Fire-and-forget dispatch to recompute global status cleanly
+          curl -fsSL -X POST \
+            -H "Authorization: token ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/StegVerse-Labs/StegDB/dispatches \
-            -d '{"event_type":"stegbrain-full-cycle"}'
+            https://api.github.com/repos/StegVerse-Labs/StegBrain/dispatches \
+            -d '{"event_type":"stegbrain-recompute"}' || true
 
       - name: Open/Log Heal Issue
-        if: steps.decide.outputs.heal_needed == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          STATE="${{ steps.brain.outputs.state }}"
-          REASON="${{ steps.brain.outputs.reason }}"
-          TITLE="Auto-heal triggered - cluster state: $STATE"
-          BODY="StegBrain detected non-OK cluster state.\n\nState: \`$STATE\`\nReason: \`$REASON\`\n\nStegDB full-cycle has been triggered via repository_dispatch \`stegbrain-full-cycle\`.\n\nCheck StegVerse-Labs/StegDB workflows & repair plans for details."
-
-          gh issue create \
-            --title "$TITLE" \
-            --body "$BODY" || echo "Issue creation failed (maybe duplicate); continuing."
+        if: ${{ steps.decide.outputs.heal == 'true' }}
+        uses: peter-evans/create-issue-from-file@v4
+        with:
+          title: "StegBrain auto-heal triggered ❗"
+          content-filepath: .github/ISSUE_TEMPLATE/auto_heal.md
+          labels: "autofix,stegbrain,needs-attention"
+          update-existing: true
+          search-existing: "title"

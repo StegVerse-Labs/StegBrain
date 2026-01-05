@@ -1,45 +1,75 @@
-name: StegBrain Gate
+name: StegBrain - Gate
 
 on:
+  workflow_dispatch: {}
   workflow_call:
+    inputs:
+      require_state:
+        description: "Required cluster state to pass (usually ok)"
+        required: false
+        default: "ok"
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
-  check-brain:
+  gate:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout StegBrain
         uses: actions/checkout@v4
-        with:
-          repository: StegVerse-Labs/StegBrain
-          path: brain
 
-      - name: Read Brain State
-        id: brain
+      - name: Read meta/global_status.json
+        id: read
+        shell: bash
         run: |
-          if [ ! -f brain/meta/global_status.json ]; then
-            echo "state=unknown" >> $GITHUB_OUTPUT
-            echo "allowed=false" >> $GITHUB_OUTPUT
-            echo "reason=global_status.json missing" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          STATE=$(jq -r '.cluster.state' brain/meta/global_status.json)
-          ALLOWED=$(jq -r '.prod_gate.allowed' brain/meta/global_status.json)
-          REASON=$(jq -r '.prod_gate.reason' brain/meta/global_status.json)
-          echo "state=$STATE" >> $GITHUB_OUTPUT
-          echo "allowed=$ALLOWED" >> $GITHUB_OUTPUT
-          echo "reason=$REASON" >> $GITHUB_OUTPUT
+          set -euo pipefail
 
-      - name: Enforce Brain Rules
-        run: |
-          STATE="${{ steps.brain.outputs.state }}"
-          ALLOWED="${{ steps.brain.outputs.allowed }}"
-          REASON="${{ steps.brain.outputs.reason }}"
-
-          echo "Brain state: $STATE"
-          echo "Prod allowed: $ALLOWED ($REASON)"
-
-          if [ "$ALLOWED" != "true" ]; then
-            echo "StegBrain blocked this deployment."
+          FILE="meta/global_status.json"
+          if [[ ! -f "$FILE" ]]; then
+            echo "::error title=Missing global_status.json::StegBrain meta/global_status.json not found (fail-closed)."
             exit 1
           fi
+
+          echo "Global status file:"
+          cat "$FILE"
+
+          STATE=$(python - <<'PY'
+          import json
+          with open("meta/global_status.json","r",encoding="utf-8") as f:
+              d=json.load(f)
+          print(d.get("state","broken"))
+          PY
+          )
+
+          REASON=$(python - <<'PY'
+          import json
+          with open("meta/global_status.json","r",encoding="utf-8") as f:
+              d=json.load(f)
+          print(d.get("reason","no-reason"))
+          PY
+          )
+
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQUIRED="${{ inputs.require_state }}"
+          STATE="${{ steps.read.outputs.state }}"
+          REASON="${{ steps.read.outputs.reason }}"
+
+          echo "Required: $REQUIRED"
+          echo "Actual:   $STATE"
+          echo "Reason:   $REASON"
+
+          if [[ "$STATE" != "$REQUIRED" ]]; then
+            echo "::error title=StegBrain gate blocked::Required '$REQUIRED' but got '$STATE' ($REASON)"
+            exit 1
+          fi
+
+          echo "✅ Gate passed."

@@ -38,14 +38,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # IMPORTANT: never pipe logs into the JSON file.
-          # Write JSON ONLY to the file.
+          # Write JSON ONLY (no pipes, no tee)
           python scripts/compute_global_status.py > meta/global_status.json
 
-          # Validate JSON (fail hard if invalid)
+          # Hard validation
           python -m json.tool meta/global_status.json >/dev/null
 
-          echo "Wrote meta/global_status.json:"
+          echo "Valid global_status.json written:"
           cat meta/global_status.json
 
       - name: Commit & push meta/global_status.json (main only)

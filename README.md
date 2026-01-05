@@ -2,28 +2,25 @@
 
 Autonomous global state controller for the StegVerse-Labs cluster.
 
-StegBrain:
+StegBrain does three things:
 
-- Aggregates signals from all guardian repos (starting with StegDB)
-- Produces `meta/global_status.json`
-- Exposes a canonical cluster state: `ok`, `degraded`, `broken`, `unknown`
-- Maintains build-mode vs production-mode cluster enforcement
-- Enables "cannot deploy if cluster brain says no"
+1. Reads machine-readable **status contracts** from cluster signal providers (starting with **StegDB**).
+2. Produces a single cluster summary: `meta/global_status.json`.
+3. Exposes a simple gating view (`ok` / `degraded` / `broken`) that other workflows can enforce (build-mode vs production-mode).
 
-This is the StegVerse control brain.
+## Cluster state model
 
-# StegBrain
+StegBrain reports one of:
 
-Global health and dependency brain for the StegVerse-Labs cluster.
+- `ok` — required signals present and healthy
+- `degraded` — required signals present but indicate partial impairment
+- `broken` — a required signal is missing or indicates a hard failure
 
-StegBrain does **three main things**:
+Missing required inputs are treated as `broken` with an explicit `reason` (e.g., `missing-signal`). “Unknown” is not a stable output state.
 
-1. Reads dependency + metadata signals from guardian repos (starting with **StegDB**).
-2. Produces a single `meta/global_status.json` summary for the whole cluster.
-3. Exposes a simple “OK / DEGRADED / BROKEN” view that other workflows can gate on.
+## Current signal providers
 
-Current data sources:
-
-- `StegVerse-Labs/StegDB`
-  - `meta/dependency_status.json`
-  - `meta/aggregated_files.jsonl` (for counts only)
+### StegVerse-Labs/StegDB
+- `meta/dependency_status.json`  
+  Must always be present. On failures it should still exist and report `state: degraded|broken` with a reason.
+- `meta/aggregated_files.jsonl` (counts only)

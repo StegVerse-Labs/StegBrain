@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
 
 def load_json(path: Path):
     try:
@@ -15,35 +12,26 @@ def load_json(path: Path):
     except Exception:
         return None
 
-
-def log(msg: str) -> None:
-    # Logs go to stderr so stdout remains clean if ever used by a workflow.
-    print(msg, file=sys.stderr)
-
-
 def main() -> int:
     """
     Reads a local file (downloaded from StegDB) at:
       meta_sources/stegdb_dependency_status.json
 
-    Writes:
-      meta/global_status.json
+    Writes JSON ONLY to stdout (caller redirects to meta/global_status.json).
 
     Fail-closed behavior:
       - If missing/unreadable -> global state = broken
       - No 'unknown' allowed
     """
     src = Path("meta_sources/stegdb_dependency_status.json")
-    out = Path("meta/global_status.json")
-    out.parent.mkdir(parents=True, exist_ok=True)
 
-    # Default: fail-closed
     global_state = "broken"
     reason = "missing-stegdb-dependency-status"
+
     details = {
         "source": "StegBrain",
         "generated_at_utc": utc_now(),
-        "inputs": {},
+        "inputs": {}
     }
 
     if src.exists():
@@ -64,8 +52,6 @@ def main() -> int:
         else:
             global_state = "broken"
             reason = "unreadable-stegdb-json"
-    else:
-        log(f"[compute_global_status] missing input: {src}")
 
     global_payload = {
         "provider": "StegBrain",
@@ -75,16 +61,9 @@ def main() -> int:
         "details": details,
     }
 
-    # Write canonical output ONLY to file.
-    out.write_text(
-        json.dumps(global_payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-    # IMPORTANT: Do NOT print JSON to stdout (prevents “Extra data” corruption)
-    log(f"[compute_global_status] wrote {out} state={global_state} reason={reason}")
+    # IMPORTANT: JSON ONLY to stdout
+    print(json.dumps(global_payload, indent=2, sort_keys=True))
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

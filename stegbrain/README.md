@@ -34,3 +34,5 @@ The Ops Agent:
 - does not block merges by default
 
 It assists humans and upstream systems by improving data quality.
+
+See the root-level README for StegBrain Core (global cluster control semantics).

@@ -4,19 +4,73 @@ from pathlib import Path
 from jsonschema import validate, ValidationError
 
 
+ALLOWLIST_FILENAME = "stegbrain.allowlist"
+
+
 def load_json(p: Path):
     with p.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
+def _read_allowlist(repo_root: Path):
+    """
+    Reads repo_root/stegbrain.allowlist if present.
+
+    Format:
+      - one path prefix per line
+      - blank lines and lines starting with # are ignored
+      - prefixes are treated as directory prefixes (e.g. 'examples/' or 'meta/')
+    """
+    allowlist_path = repo_root / ALLOWLIST_FILENAME
+    if not allowlist_path.exists():
+        return None  # means "no allowlist provided"
+
+    prefixes = []
+    for raw in allowlist_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Normalize separators and ensure trailing slash for prefix matching.
+        line = line.replace("\\", "/")
+        if not line.endswith("/"):
+            line = line + "/"
+        prefixes.append(line)
+    return prefixes or []  # empty list means "validate nothing eligible"
+
+
+def _path_matches_prefixes(path: Path, repo_root: Path, prefixes):
+    """
+    Returns True if path (relative to repo_root) starts with any prefix.
+    """
+    rel = path.resolve().relative_to(repo_root.resolve()).as_posix()
+    # Match both directory itself and files under it:
+    # - prefix "meta/" should match "meta/foo.json"
+    return any(rel.startswith(pref) for pref in prefixes)
+
+
+def _default_eligible(path: Path):
+    """
+    Backwards-compatible behavior if no allowlist is present.
+    Only validate JSON under examples/, demo/, or meta/.
+    """
+    return any(x in path.parts for x in ("examples", "demo", "meta"))
+
+
 def validate_examples(repo_root: Path, core_schemas_dir: Path):
+    prefixes = _read_allowlist(repo_root)
+
     results = []
     for p in sorted(repo_root.rglob("*.json")):
         if ".github" in p.parts:
             continue
-        # validate only demo/example/meta JSON to avoid random JSON blobs
-        if not any(x in p.parts for x in ("examples", "demo", "meta")):
-            continue
+
+        # If allowlist exists, use it. Otherwise use default eligibility rules.
+        if prefixes is not None:
+            if not _path_matches_prefixes(p, repo_root, prefixes):
+                continue
+        else:
+            if not _default_eligible(p):
+                continue
 
         schema_name = p.name.replace(".json", ".schema.json")
         schema_path = core_schemas_dir / schema_name
@@ -35,7 +89,11 @@ def validate_examples(repo_root: Path, core_schemas_dir: Path):
             results.append(f"❌ `{p.as_posix()}` error: {str(e)}")
 
     if not results:
-        results = ["ℹ️ No eligible JSON found (validates only under examples/demo/meta)."]
+        if prefixes is not None:
+            results = [f"ℹ️ No eligible JSON found (allowlist `{ALLOWLIST_FILENAME}` matched nothing)."]
+        else:
+            results = ["ℹ️ No eligible JSON found (validates only under examples/demo/meta by default)."]
+
     return results
 
 

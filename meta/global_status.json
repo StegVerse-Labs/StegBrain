@@ -1,6 +1,6 @@
 {
   "details": {
-    "generated_at_utc": "2026-03-03T05:43:49Z",
+    "generated_at_utc": "2026-03-04T05:39:42Z",
     "inputs": {
       "StegDB": {
         "artifacts": {
@@ -20,7 +20,7 @@
     },
     "source": "StegBrain"
   },
-  "generated_at_utc": "2026-03-03T05:43:49Z",
+  "generated_at_utc": "2026-03-04T05:39:42Z",
   "provider": "StegBrain",
   "reason": "stegdb:canonical-published",
   "state": "ok"
